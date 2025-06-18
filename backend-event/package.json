@@ -1,0 +1,22 @@
+{
+  "name": "event-announcement-system",
+  "version": "1.0.0",
+  "description": "A serverless event announcement system using SAM, S3, Lambda, SNS, and API Gateway",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.828.0",
+    "@aws-sdk/client-s3": "^3.500.0",
+    "@aws-sdk/client-sns": "^3.500.0",
+    "slugify": "^1.6.6"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.122",
+    "esbuild": "^0.25.5",
+    "typescript": "^5.4.5"
+  }
+}

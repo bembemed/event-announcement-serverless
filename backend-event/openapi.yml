@@ -1,0 +1,190 @@
+openapi: 3.0.1
+info:
+  title: Event Announcement API
+  description: >
+    A serverless API to manage events. Includes endpoints for public event listing, 
+    event submission by organizers, email subscriptions, and personalized event feeds for users.
+  version: 1.0.0
+
+servers:
+  - url: https://f90xtznl73.execute-api.eu-west-1.amazonaws.com/Prod
+
+paths:
+
+  /events:
+    get:
+      summary: List all public events
+      description: Returns a list of all submitted events from all organizers.
+      responses:
+        '200':
+          description: List of events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Event'
+
+  /event:
+    post:
+      summary: Submit a new event
+      description: Allows an authenticated organizer to publish a new event.
+      security:
+        - CognitoAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventInput'
+      responses:
+        '200':
+          description: Event successfully submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /subscribe:
+    post:
+      summary: Subscribe with email
+      description: Allows any visitor to subscribe with their email to receive notifications.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Subscription confirmation sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /subscribe-organizer:
+    post:
+      summary: Subscribe to a specific organizer
+      description: Authenticated users can subscribe to an organizer’s future events.
+      security:
+        - CognitoAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                organizerEmail:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Successfully subscribed to organizer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /my/events:
+    get:
+      summary: Get events submitted by the logged-in organizer
+      security:
+        - CognitoAuth: []
+      responses:
+        '200':
+          description: List of events submitted by the authenticated user
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Event'
+
+  /my/subscriptions:
+    get:
+      summary: Get list of organizers the user has subscribed to
+      security:
+        - CognitoAuth: []
+      responses:
+        '200':
+          description: List of organizer emails
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  format: email
+
+  /my/feed:
+    get:
+      summary: Get events from organizers the user is subscribed to
+      security:
+        - CognitoAuth: []
+      responses:
+        '200':
+          description: List of events from subscribed organizers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Event'
+
+components:
+  securitySchemes:
+    CognitoAuth:
+      type: openIdConnect
+      openIdConnectUrl: https://event-auth-demo.auth.eu-west-1.amazoncognito.com/.well-known/openid-configuration
+
+  schemas:
+    EventInput:
+      type: object
+      required:
+        - title
+        - date
+        - location
+      properties:
+        title:
+          type: string
+        date:
+          type: string
+          format: date
+        location:
+          type: string
+        description:
+          type: string
+
+    Event:
+      type: object
+      properties:
+        title:
+          type: string
+        date:
+          type: string
+          format: date
+        location:
+          type: string
+        description:
+          type: string
+        submittedBy:
+          type: string
+          format: email
+        createdAt:
+          type: string
+          format: date-time

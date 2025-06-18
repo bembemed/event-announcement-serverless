@@ -1,0 +1,385 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  event announcement
+
+Globals:
+  Function:
+    Timeout: 10
+
+Resources:
+
+  ### Cognito Resources ###
+  EventUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: EventAnnouncementUserPool
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  EventUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: EventAppClient
+      UserPoolId: !Ref EventUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      SupportedIdentityProviders: [COGNITO]      
+      CallbackURLs: 
+        - https://jwt.io
+        - https://eventfront.dlblnz5yjhuti.amplifyapp.com
+        - http://localhost:3000
+      LogoutURLs: 
+        - https://jwt.io
+        - https://eventfront.dlblnz5yjhuti.amplifyapp.com
+        - http://localhost:3000
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [implicit]
+      AllowedOAuthScopes: [email, openid, profile]
+
+  EventUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: event-auth-demo
+      UserPoolId: !Ref EventUserPool
+
+  ### Storage and Messaging ###
+  EventBucket:
+    Type: AWS::S3::Bucket
+
+  EventTopic:
+    Type: AWS::SNS::Topic
+
+  OrganizerSubscriptionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: OrganizerSubscriptions
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: subscriber
+          AttributeType: S
+        - AttributeName: organizer
+          AttributeType: S
+      KeySchema:
+        - AttributeName: subscriber
+          KeyType: HASH
+        - AttributeName: organizer
+          KeyType: RANGE
+
+  RateLimitTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: EventRateLimit
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: email
+          KeyType: HASH
+
+  OrganizerTopicsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: OrganizerTopics
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: organizerEmail
+          AttributeType: S
+      KeySchema:
+        - AttributeName: organizerEmail
+          KeyType: HASH
+
+  ### API Gateway ###
+  EventApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt EventUserPool.Arn
+
+  ### Lambda Functions ###
+  SubmitEventFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: submitEvent.handler
+      Runtime: nodejs22.x
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /event
+            Method: POST
+            RestApiId: !Ref EventApi
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref EventBucket
+          TOPIC_ARN: !GetAtt EventTopic.TopicArn
+          TOPIC_TABLE: !Ref OrganizerTopicsTable
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref EventBucket
+        - S3WritePolicy:
+            BucketName: !Ref EventBucket
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt EventTopic.TopicName
+        - DynamoDBCrudPolicy:
+            TableName: OrganizerTopicsTable
+        - Statement:                         # ✅ Add this block:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem     
+              Resource: !GetAtt OrganizerTopicsTable.Arn
+            - Effect: Allow
+              Action:
+                - sns:CreateTopic   # ✅ Allow creating topics
+                - sns:Publish       # ✅ Optional: allow publishing to them
+                - sns:Subscribe     # ✅ Optional: allow subscribing users
+              Resource: "*"
+    Metadata:
+        BuildMethod: esbuild
+        BuildProperties:
+          EntryPoints: [submitEvent.ts]
+          External: ["@aws-sdk/*"]
+          Target: "es2020"
+
+  GetEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: getEvents.handler
+      Runtime: nodejs22.x
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /events
+            Method: GET
+            RestApiId: !Ref EventApi
+            Auth: { Authorizer: NONE }
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref EventBucket
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref EventBucket
+    Metadata:
+        BuildMethod: esbuild
+        BuildProperties:
+          EntryPoints: [getEvents.ts]
+          External: ["@aws-sdk/*"]
+          Target: "es2020"
+
+  SubscribeToOrganizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: subscribeToOrganizer.handler
+      Runtime: nodejs22.x
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /subscribe-organizer
+            Method: POST
+            RestApiId: !Ref EventApi
+      Environment:
+        Variables:
+          SUBSCRIPTION_TABLE: !Ref OrganizerSubscriptionsTable
+          TOPIC_TABLE: !Ref OrganizerTopicsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: OrganizerSubscriptions
+        - DynamoDBCrudPolicy:
+            TableName: OrganizerTopicsTable
+        - Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+            Resource: !GetAtt OrganizerTopicsTable.Arn
+          - Effect: Allow
+            Action:
+              - sns:CreateTopic
+              - sns:Subscribe           
+              - sns:Publish            
+            Resource: arn:aws:sns:eu-west-1:793911908102:organizer-*
+    Metadata:
+        BuildMethod: esbuild
+        BuildProperties:
+          EntryPoints: [subscribeToOrganizer.ts]
+
+  SubscribeEmailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: subscribeEmail.handler
+      Runtime: nodejs22.x
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /subscribe
+            Method: POST
+            RestApiId: !Ref EventApi
+            Auth: { Authorizer: NONE }
+      Environment:
+        Variables:
+          TOPIC_ARN: !Ref EventTopic
+          RATE_LIMIT_TABLE: !Ref RateLimitTable
+      Policies:
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt EventTopic.TopicName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Subscribe
+              Resource: !Ref EventTopic
+        - DynamoDBCrudPolicy:
+            TableName: EventRateLimit
+    Metadata:
+        BuildMethod: esbuild
+        BuildProperties:
+          EntryPoints: [subscribeEmail.ts]
+          External: ["@aws-sdk/*"]
+          Target: "es2020"
+
+  GetUserEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: getUserEvents.handler
+      Runtime: nodejs22.x
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /my/events
+            Method: GET
+            RestApiId: !Ref EventApi
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref EventBucket
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref EventBucket
+    Metadata:
+        BuildMethod: esbuild
+        BuildProperties:
+          EntryPoints: [getUserEvents.ts]
+
+  ListSubscribedOrganizersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: listSubscribedOrganizers.handler
+      Runtime: nodejs22.x
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /my/subscriptions
+            Method: GET
+            RestApiId: !Ref EventApi
+      Environment:
+        Variables:
+          SUBSCRIPTIONS_TABLE: !Ref OrganizerSubscriptionsTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: OrganizerSubscriptions
+    Metadata:
+        BuildMethod: esbuild
+        BuildProperties:
+          EntryPoints: [listSubscribedOrganizers.ts]
+
+  GetSubscribedEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: getSubscribedEvents.handler
+      Runtime: nodejs22.x
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /my/feed
+            Method: GET
+            RestApiId: !Ref EventApi
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref EventBucket
+          SUBSCRIPTIONS_TABLE: !Ref OrganizerSubscriptionsTable
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref EventBucket
+        - DynamoDBReadPolicy:
+            TableName: OrganizerSubscriptions
+    Metadata:
+        BuildMethod: esbuild
+        BuildProperties:
+          EntryPoints: [getSubscribedEvents.ts]
+  
+  CleanupOldEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: cleanupOldEvents.handler
+      Runtime: nodejs22.x
+      Events:
+        CleanupSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 day)
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref EventBucket
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref EventBucket
+        - S3WritePolicy:
+            BucketName: !Ref EventBucket
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - cleanupOldEvents.ts
+        External:
+          - "@aws-sdk/*"
+        Target: "es2020"
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway endpoint"
+    Value: !Sub "https://${EventApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+
+  UserPoolId:
+    Description: "Cognito User Pool ID"
+    Value: !Ref EventUserPool
+
+  UserPoolClientId:
+    Description: "Cognito App Client ID"
+    Value: !Ref EventUserPoolClient
+
+  UserPoolDomain:
+    Description: "Cognito Hosted Domain"
+    Value: !Sub "https://${EventUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com"

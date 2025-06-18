@@ -1,0 +1,58 @@
+https://event-auth-demo.auth.eu-west-1.amazoncognito.com/login?client_id=3dn2nb3s4l90q8g2tnuel8qn5h&response_type=token&scope=email+openid+profile&redirect_uri=https://jwt.io
+
+
+
+curl -X POST https://f90xtznl73.execute-api.eu-west-1.amazonaws.com/Prod/event   
+
+🧪 1. GET /events (public)
+bash
+Copier
+Modifier
+curl https://<API_ID>.execute-api.<region>.amazonaws.com/Prod/events
+✅ Response: List of all events
+
+🧪 2. POST /event (auth required)
+bash
+Copier
+Modifier
+curl -X POST https://<API_ID>.execute-api.<region>.amazonaws.com/Prod/event \
+  -H "Authorization: Bearer <YOUR_ID_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "title": "Test Event",
+        "date": "2025-07-01",
+        "location": "Nouakchott",
+        "description": "This is a test event"
+      }'
+
+
+🧪 3. POST /subscribe (public)  
+curl -X POST https://f90xtznl73.execute-api.eu-west-1.amazonaws.com/Prod/subscribe -H "Content-Type: application/json" -d '{ "email": "bembemed50@gmail.com" }'
+✅ Response: Email confirmation message
+
+🧪 4. POST /subscribe-organizer (auth required)
+
+curl -X POST https://f90xtznl73.execute-api.eu-west-1.amazonaws.com/Prod/subscribe-organizer \
+  -H "Authorization: Bearer $T" \
+  -H "Content-Type: application/json" \
+  -d '{ "organizerEmail": "bembemed50@gmail.com" }'
+✅ Response: Confirmation of subscription
+
+🧪 5. GET /my-events (auth required)
+
+curl -H "Authorization: Bearer $T"      -H "Content-Type: application/json"      https://f90xtznl73.execute-api.eu-west-1.amazonaws.com/Prod/my/events
+
+✅ Response: Events created by this user
+
+🧪 6. GET /my-subscriptions (auth required)
+
+curl https://f90xtznl73.execute-api.eu-west-1.amazonaws.com/Prod/my/subscriptions \
+  -H "Authorization: Bearer $T"
+✅ Response: List of subscribed organizer emails
+
+
+🧪 7. GET /my-feed (auth required)
+
+curl https://f90xtznl73.execute-api.eu-west-1.amazonaws.com/Prod/my/feed \
+  -H "Authorization: Bearer $T"
+✅ Response: Events from organizers the user subscribed to
