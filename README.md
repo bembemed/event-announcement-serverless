@@ -4,7 +4,7 @@ A full-stack serverless application for event management and real-time notificat
 
 ## 🎥 Demo
 
-You can watch the demo video [here](https://raw.githubusercontent.com/bembemed/event-announcement-serverless/master/main/screen-capture%20(1).webm)
+You can watch the demo video [here](https://raw.githubusercontent.com/bembemed/event-announcement-serverless/master/demo.webm)
 
 ## 🏗️ Architecture
 
